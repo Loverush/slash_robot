@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"slash-robot/params"
 	"unsafe"
 
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -11,11 +12,10 @@ import (
 )
 
 var (
-	bscTestnet = "https://data-seed-prebsc-2-s1.binance.org:8545/"
-	bsc        = "https://bsc-dataseed.binance.org/"
-
-	gethHttp = "http://127.0.0.1:8545"
-	gethIpc  = "/server/validator/geth.ipc"
+	bscTestnet = params.BSCTestnet
+	bsc        = params.BSC
+	gethHttp   = params.GethHttp
+	gethIpc    = params.GethIpc
 )
 
 func GetCurrentClient(clientEntered string) *ethclient.Client {
