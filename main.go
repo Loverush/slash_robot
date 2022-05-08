@@ -4,13 +4,12 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"slash-robot/params"
 	"slash-robot/utils"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 )
-
-const recordFile = "./data/voteRecord.json"
 
 func mainLoop(client *ethclient.Client, rpcClient *rpc.Client, vrStore *utils.VotesRecordStore) {
 	// Go channel to pipe data from client subscription
@@ -53,7 +52,7 @@ func main() {
 	rpcClient := utils.InitRPCClient(*clientEntered)
 	client := utils.GetCurrentClient(*clientEntered)
 
-	var vrStore = utils.NewVotesRecordStore(recordFile)
+	var vrStore = utils.NewVotesRecordStore(params.RecordFile)
 	err := vrStore.Load()
 	if err != nil {
 		fmt.Println(err)
