@@ -7,13 +7,14 @@ import (
 	"slash-robot/params"
 	"slash-robot/utils"
 
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
 func mainLoop(client *ethclient.Client, rpcClient *rpc.Client, vrStore *utils.VotesRecordStore) {
 	// Go channel to pipe data from client subscription
-	newVoteChannel := make(chan *utils.VoteEnvelope)
+	newVoteChannel := make(chan *types.VoteEnvelope)
 
 	// Subscribe to receive one time events for new vote
 	_, err := rpcClient.EthSubscribe(
@@ -22,11 +23,14 @@ func mainLoop(client *ethclient.Client, rpcClient *rpc.Client, vrStore *utils.Vo
 
 	if err != nil {
 		fmt.Println("error while subscribing: ", err)
+	} else {
+		fmt.Println("Subscribed to vote pool")
 	}
-	fmt.Println("Subscribed to vote pool")
 
 	for {
 		vote := <-newVoteChannel
+		fmt.Println("vote message received:")
+		fmt.Println(vote.Data)
 		ok, height := checkVote(vote, vrStore)
 		if !ok {
 			vote2 := vrStore.VoteRecord[vote.VoteAddress][height]
@@ -34,14 +38,13 @@ func mainLoop(client *ethclient.Client, rpcClient *rpc.Client, vrStore *utils.Vo
 			fmt.Println("vote address:")
 			fmt.Println(vote.VoteAddress)
 			fmt.Println("vote message:")
-			fmt.Println(vote.Data)
 			fmt.Println(vote2)
 			utils.ReportVote(vote, vote2, client)
 		}
 	}
 }
 
-func checkVote(vote *utils.VoteEnvelope, vrStore *utils.VotesRecordStore) (bool, uint64) {
+func checkVote(vote *types.VoteEnvelope, vrStore *utils.VotesRecordStore) (bool, uint64) {
 	return utils.CheckVote(vote, vrStore)
 }
 

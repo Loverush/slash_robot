@@ -8,38 +8,13 @@ import (
 	"os"
 	"slash-robot/abi"
 	"sync"
-	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
-
-const (
-	BLSPublicKeyLength = 48
-	BLSSignatureLength = 96
-)
-
-type BLSPublicKey [BLSPublicKeyLength]byte
-type BLSSignature [BLSSignatureLength]byte
-type ValidatorsBitSet uint64
-
-type VoteData struct {
-	SourceNumber uint64
-	SourceHash   common.Hash
-	TargetNumber uint64
-	TargetHash   common.Hash
-}
-
-type VoteEnvelope struct {
-	VoteAddress BLSPublicKey
-	Signature   BLSSignature
-	Data        *VoteData
-
-	// caches
-	hash atomic.Value
-}
 
 var (
 	chainId           = big.NewInt(714)
@@ -47,24 +22,24 @@ var (
 )
 
 type VotesRecordStore struct {
-	VoteRecord map[BLSPublicKey]map[uint64]*VoteEnvelope
+	VoteRecord map[types.BLSPublicKey]map[uint64]*types.VoteEnvelope
 	mu         sync.RWMutex
 	file       *os.File
 }
 
 type record struct {
-	voteAddr BLSPublicKey
+	voteAddr types.BLSPublicKey
 	height   uint64
-	vote     *VoteEnvelope
+	vote     *types.VoteEnvelope
 }
 
 type slashEvidence struct {
-	voteA    *VoteData
-	voteB    *VoteData
-	voteAddr BLSPublicKey
+	voteA    *types.VoteData
+	voteB    *types.VoteData
+	voteAddr types.BLSPublicKey
 }
 
-func CheckVote(vote *VoteEnvelope, vrStore *VotesRecordStore) (bool, uint64) {
+func CheckVote(vote *types.VoteEnvelope, vrStore *VotesRecordStore) (bool, uint64) {
 	voteAddr := vote.VoteAddress
 	voteData := vote.Data
 	// 1. no double vote
@@ -84,11 +59,10 @@ func CheckVote(vote *VoteEnvelope, vrStore *VotesRecordStore) (bool, uint64) {
 		}
 	}
 	vrStore.Set(voteAddr, voteData.TargetNumber, vote)
-	vrStore.save(voteAddr, voteData.TargetNumber, vote)
 	return true, 0
 }
 
-func ReportVote(vote1, vote2 *VoteEnvelope, client *ethclient.Client) {
+func ReportVote(vote1, vote2 *types.VoteEnvelope, client *ethclient.Client) {
 	var evidence slashEvidence
 	evidence.voteA = vote1.Data
 	evidence.voteB = vote2.Data
@@ -105,7 +79,7 @@ func ReportVote(vote1, vote2 *VoteEnvelope, client *ethclient.Client) {
 }
 
 func NewVotesRecordStore(filename string) *VotesRecordStore {
-	s := &VotesRecordStore{VoteRecord: make(map[BLSPublicKey]map[uint64]*VoteEnvelope)}
+	s := &VotesRecordStore{VoteRecord: make(map[types.BLSPublicKey]map[uint64]*types.VoteEnvelope)}
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
 		log.Fatal("VotesRecordStore:", err)
@@ -114,12 +88,15 @@ func NewVotesRecordStore(filename string) *VotesRecordStore {
 	return s
 }
 
-func (vr *VotesRecordStore) save(voteAddr BLSPublicKey, height uint64, vote *VoteEnvelope) error {
-	e := json.NewEncoder(vr.file)
-	return e.Encode(record{voteAddr, height, vote})
-}
+//func (vr *VotesRecordStore) save(voteAddr types.BLSPublicKey, height uint64, vote *types.VoteEnvelope) error {
+//	e := json.NewEncoder(vr.file)
+//	return e.Encode(record{voteAddr, height, vote})
+//}
 
-func (vr *VotesRecordStore) Set(voteAddr BLSPublicKey, height uint64, vote *VoteEnvelope) bool {
+func (vr *VotesRecordStore) Set(voteAddr types.BLSPublicKey, height uint64, vote *types.VoteEnvelope) bool {
+	if _, ok := vr.VoteRecord[voteAddr]; !ok {
+		vr.VoteRecord[voteAddr] = make(map[uint64]*types.VoteEnvelope)
+	}
 	vr.VoteRecord[voteAddr][height] = vote
 	return true
 }
