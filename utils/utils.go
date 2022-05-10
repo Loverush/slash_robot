@@ -3,9 +3,11 @@ package utils
 import (
 	"encoding/json"
 	"io"
+	"io/ioutil"
 	"log"
 	"math/big"
 	"os"
+	"path"
 	"slash-robot/abi"
 	"sync"
 
@@ -24,13 +26,12 @@ var (
 type VotesRecordStore struct {
 	VoteRecord map[types.BLSPublicKey]map[uint64]*types.VoteEnvelope
 	mu         sync.RWMutex
-	file       *os.File
+	FileDir    string
 }
 
 type record struct {
-	voteAddr types.BLSPublicKey
-	height   uint64
-	vote     *types.VoteEnvelope
+	Height uint64
+	Vote   *types.VoteEnvelope
 }
 
 type slashEvidence struct {
@@ -58,7 +59,7 @@ func CheckVote(vote *types.VoteEnvelope, vrStore *VotesRecordStore) (bool, uint6
 			}
 		}
 	}
-	vrStore.Set(voteAddr, voteData.TargetNumber, vote)
+	vrStore.set(voteAddr, voteData.TargetNumber, vote)
 	return true, 0
 }
 
@@ -74,43 +75,58 @@ func ReportVote(vote1, vote2 *types.VoteEnvelope, client *ethclient.Client) {
 	slashInstance, _ := abi.NewContractInstance(slashContractAddr, abi.SlashABI, client)
 	_, err := slashInstance.Transact(ops, "submitFinalityViolationEvidence", evidence)
 	if err != nil {
-		return
+		log.Fatal("Save VotesRecordStore:", err)
 	}
 }
 
-func NewVotesRecordStore(filename string) *VotesRecordStore {
-	s := &VotesRecordStore{VoteRecord: make(map[types.BLSPublicKey]map[uint64]*types.VoteEnvelope)}
-	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+func NewVotesRecordStore(fileDir string) *VotesRecordStore {
+	vrStore := &VotesRecordStore{
+		VoteRecord: make(map[types.BLSPublicKey]map[uint64]*types.VoteEnvelope),
+		FileDir:    fileDir,
+	}
+	files, err := ioutil.ReadDir(fileDir)
 	if err != nil {
 		log.Fatal("VotesRecordStore:", err)
 	}
-	s.file = f
-	return s
+	for _, file := range files {
+		if len(file.Name()) != 53 {
+			continue
+		}
+		go vrStore.load(file.Name())
+	}
+	return vrStore
 }
 
-//func (vr *VotesRecordStore) save(voteAddr types.BLSPublicKey, height uint64, vote *types.VoteEnvelope) error {
-//	e := json.NewEncoder(vr.file)
-//	return e.Encode(record{voteAddr, height, vote})
-//}
-
-func (vr *VotesRecordStore) Set(voteAddr types.BLSPublicKey, height uint64, vote *types.VoteEnvelope) bool {
+func (vr *VotesRecordStore) set(voteAddr types.BLSPublicKey, height uint64, vote *types.VoteEnvelope) bool {
+	vr.mu.Lock()
+	defer vr.mu.Unlock()
 	if _, ok := vr.VoteRecord[voteAddr]; !ok {
 		vr.VoteRecord[voteAddr] = make(map[uint64]*types.VoteEnvelope)
 	}
 	vr.VoteRecord[voteAddr][height] = vote
+	if _, ok := vr.VoteRecord[voteAddr][height-256]; ok {
+		delete(vr.VoteRecord[voteAddr], height-256)
+	}
 	return true
 }
 
-func (vr *VotesRecordStore) Load() error {
-	if _, err := vr.file.Seek(0, 0); err != nil {
+func (vr *VotesRecordStore) load(file string) error {
+	filePath := path.Join(vr.FileDir, file)
+	f, err := os.Open(filePath)
+	defer f.Close()
+	if err != nil {
+		log.Fatal("Err saveLoop VotesRecordStore:", err)
+	}
+	if _, err := f.Seek(0, 0); err != nil {
 		return err
 	}
-	d := json.NewDecoder(vr.file)
-	var err error
+	var voteAddr types.BLSPublicKey
+	copy(voteAddr[:], file[:len(file)-5])
+	d := json.NewDecoder(f)
 	for err == nil {
 		var r record
 		if err = d.Decode(&r); err == nil {
-			vr.Set(r.voteAddr, r.height, r.vote)
+			vr.set(voteAddr, r.Height, r.Vote)
 		}
 	}
 	if err == io.EOF {

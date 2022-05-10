@@ -2,8 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"path"
 	"slash-robot/params"
 	"slash-robot/utils"
 
@@ -27,17 +33,38 @@ func mainLoop(client *ethclient.Client, rpcClient *rpc.Client, vrStore *utils.Vo
 		fmt.Println("Subscribed to vote pool")
 	}
 
+	c := make(chan os.Signal, 0)
+	signal.Notify(c)
 	for {
-		vote := <-newVoteChannel
-		fmt.Println("vote message received:", vote.Data)
-		ok, height := checkVote(vote, vrStore)
-		if !ok {
-			vote2 := vrStore.VoteRecord[vote.VoteAddress][height]
-			fmt.Println("bad vote detected!")
-			fmt.Println("vote address:", vote.VoteAddress)
-			fmt.Println("vote message:", vote2.Data)
-			utils.ReportVote(vote, vote2, client)
+		select {
+		case vote := <-newVoteChannel:
+			fmt.Println("vote message received:", vote.Data)
+			ok, height := checkVote(vote, vrStore)
+			if !ok {
+				vote2 := vrStore.VoteRecord[vote.VoteAddress][height]
+				fmt.Println("bad vote detected!")
+				fmt.Println("vote address:", vote.VoteAddress)
+				fmt.Println("vote message:", vote2.Data)
+				utils.ReportVote(vote, vote2, client)
+			}
+		case s := <-c:
+			if s == os.Interrupt || s == os.Kill {
+				for val, record := range vrStore.VoteRecord {
+					filePath := path.Join(vrStore.FileDir, hex.EncodeToString(val.Bytes()))
+					f, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
+					if err != nil {
+						log.Fatal("Err saveLoop VotesRecordStore:", err)
+					}
+					e := json.NewEncoder(f)
+					if err := e.Encode(record); err != nil {
+						log.Fatal("Error saving vrStore: ", err)
+					}
+					f.Close()
+				}
+				os.Exit(0)
+			}
 		}
+
 	}
 }
 
@@ -53,10 +80,5 @@ func main() {
 	client := utils.GetCurrentClient(*clientEntered)
 
 	var vrStore = utils.NewVotesRecordStore(params.RecordFile)
-	err := vrStore.Load()
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
 	mainLoop(client, rpcClient, vrStore)
 }
