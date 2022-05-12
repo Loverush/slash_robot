@@ -1,7 +1,9 @@
 package utils
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -10,6 +12,7 @@ import (
 	"path"
 	"slash-robot/abi"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -19,8 +22,8 @@ import (
 )
 
 var (
-	chainId           = big.NewInt(714)
-	slashContractAddr = common.HexToAddress("0x0000000000000000000000000000000000001001")
+	ChainId            = big.NewInt(714)
+	SlashIndicatorAddr = common.HexToAddress("0x0000000000000000000000000000000000001001")
 )
 
 type VotesRecordStore struct {
@@ -89,11 +92,23 @@ func ReportVote(vote1, vote2 *types.VoteEnvelope, client *ethclient.Client) {
 
 	account := SlashAccount
 	account.Key, _ = crypto.HexToECDSA(account.RawKey)
-	ops, _ := bind.NewKeyedTransactorWithChainID(account.Key, chainId)
-	slashInstance, _ := abi.NewContractInstance(slashContractAddr, abi.SlashABI, client)
-	_, err := slashInstance.Transact(ops, "submitFinalityViolationEvidence", evidence)
+	ops, _ := bind.NewKeyedTransactorWithChainID(account.Key, ChainId)
+	slashInstance, _ := abi.NewContractInstance(SlashIndicatorAddr, abi.SlashABI, client)
+	tx, err := slashInstance.Transact(ops, "submitFinalityViolationEvidence", evidence)
 	if err != nil {
 		log.Fatal("Report Vote:", err)
+	}
+	var rc *types.Receipt
+	for i := 0; i < 180; i++ {
+		rc, _ = client.TransactionReceipt(context.Background(), tx.Hash())
+		if rc != nil {
+			fmt.Println(rc.Logs)
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if rc == nil {
+		log.Fatal("Report Vote: submit evidence failed")
 	}
 }
 

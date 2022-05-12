@@ -7,16 +7,24 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math/big"
 	"os"
 	"os/signal"
 	"path"
+	"slash-robot/abi"
 	"slash-robot/params"
 	"slash-robot/utils"
+	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 )
+
+var relayerHubAddr = common.HexToAddress("0x0000000000000000000000000000000000001006")
 
 func mainLoop(client *ethclient.Client, rpcClient *rpc.Client, vrStore *utils.VotesRecordStore) {
 	// Go channel to pipe data from client subscription
@@ -78,6 +86,37 @@ func main() {
 
 	rpcClient := utils.InitRPCClient(*clientEntered)
 	client := utils.GetCurrentClient(*clientEntered)
+
+	account := utils.SlashAccount
+	account.Key, _ = crypto.HexToECDSA(account.RawKey)
+	slashInstance, _ := abi.NewContractInstance(relayerHubAddr, abi.RelayerHubABI, client)
+
+	var out []interface{}
+	err := slashInstance.Call(nil, &out, "isRelayer", account.Addr)
+	if err != nil {
+		log.Fatal("Relayer register:", err)
+	}
+
+	if !(out[0].(bool)) {
+		ops, _ := bind.NewKeyedTransactorWithChainID(account.Key, utils.ChainId)
+		ops.Value = new(big.Int).Mul(big.NewInt(1e18), big.NewInt(100))
+		tx, err := slashInstance.Transact(ops, "register")
+		if err != nil {
+			log.Fatal("Relayer register:", err)
+		}
+		var rc *types.Receipt
+		for i := 0; i < 180; i++ {
+			rc, _ = client.TransactionReceipt(context.Background(), tx.Hash())
+			if rc != nil {
+				fmt.Println(rc.Logs)
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		if rc == nil {
+			log.Fatal("Register relayer failed")
+		}
+	}
 
 	var vrStore = utils.NewVotesRecordStore(params.RecordFile)
 	mainLoop(client, rpcClient, vrStore)
