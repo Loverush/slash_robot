@@ -34,10 +34,18 @@ type record struct {
 	Vote   *types.VoteEnvelope
 }
 
+type VoteData struct {
+	SrcNum  *big.Int
+	SrcHash common.Hash
+	TarNum  *big.Int
+	TarHash common.Hash
+	Sig     []byte
+}
+
 type slashEvidence struct {
-	voteA    *types.VoteData
-	voteB    *types.VoteData
-	voteAddr types.BLSPublicKey
+	VoteA    *VoteData
+	VoteB    *VoteData
+	VoteAddr []byte
 }
 
 func CheckVote(vote *types.VoteEnvelope, vrStore *VotesRecordStore) (bool, uint64) {
@@ -45,7 +53,6 @@ func CheckVote(vote *types.VoteEnvelope, vrStore *VotesRecordStore) (bool, uint6
 	voteData := vote.Data
 	// 1. no double vote
 	if _, ok := vrStore.VoteRecord[voteAddr][voteData.TargetNumber]; ok {
-		// TODO delete local data
 		delete(vrStore.VoteRecord, voteAddr)
 		return false, voteData.TargetNumber
 	}
@@ -53,7 +60,6 @@ func CheckVote(vote *types.VoteEnvelope, vrStore *VotesRecordStore) (bool, uint6
 	for height := voteData.TargetNumber - 1; height > voteData.SourceNumber+1; height-- {
 		if vote, ok := vrStore.VoteRecord[voteAddr][height]; ok {
 			if vote.Data.SourceNumber > voteData.SourceNumber {
-				// TODO delete local data
 				delete(vrStore.VoteRecord, voteAddr)
 				return false, height
 			}
@@ -65,9 +71,21 @@ func CheckVote(vote *types.VoteEnvelope, vrStore *VotesRecordStore) (bool, uint6
 
 func ReportVote(vote1, vote2 *types.VoteEnvelope, client *ethclient.Client) {
 	var evidence slashEvidence
-	evidence.voteA = vote1.Data
-	evidence.voteB = vote2.Data
-	evidence.voteAddr = vote1.VoteAddress
+	evidence.VoteA = &VoteData{
+		SrcNum:  big.NewInt(int64(vote1.Data.SourceNumber)),
+		SrcHash: vote1.Data.SourceHash,
+		TarNum:  big.NewInt(int64(vote1.Data.TargetNumber)),
+		TarHash: vote1.Data.TargetHash,
+		Sig:     vote1.Signature[:],
+	}
+	evidence.VoteB = &VoteData{
+		SrcNum:  big.NewInt(int64(vote2.Data.SourceNumber)),
+		SrcHash: vote2.Data.SourceHash,
+		TarNum:  big.NewInt(int64(vote2.Data.TargetNumber)),
+		TarHash: vote2.Data.TargetHash,
+		Sig:     vote2.Signature[:],
+	}
+	evidence.VoteAddr = vote1.VoteAddress.Bytes()
 
 	account := SlashAccount
 	account.Key, _ = crypto.HexToECDSA(account.RawKey)
@@ -75,7 +93,7 @@ func ReportVote(vote1, vote2 *types.VoteEnvelope, client *ethclient.Client) {
 	slashInstance, _ := abi.NewContractInstance(slashContractAddr, abi.SlashABI, client)
 	_, err := slashInstance.Transact(ops, "submitFinalityViolationEvidence", evidence)
 	if err != nil {
-		log.Fatal("Save VotesRecordStore:", err)
+		log.Fatal("Report Vote:", err)
 	}
 }
 

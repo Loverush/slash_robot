@@ -38,11 +38,11 @@ func mainLoop(client *ethclient.Client, rpcClient *rpc.Client, vrStore *utils.Vo
 	for {
 		select {
 		case vote := <-newVoteChannel:
-			fmt.Println("vote message received:", vote.Data)
+			//fmt.Println("vote message received:", vote.Data)
 			ok, height := checkVote(vote, vrStore)
 			if !ok {
 				vote2 := vrStore.VoteRecord[vote.VoteAddress][height]
-				fmt.Println("bad vote detected!")
+				fmt.Println("--------------bad vote detected!--------------")
 				fmt.Println("vote address:", vote.VoteAddress)
 				fmt.Println("vote message:", vote2.Data)
 				utils.ReportVote(vote, vote2, client)
