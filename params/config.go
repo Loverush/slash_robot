@@ -9,5 +9,5 @@ var (
 	Address    = "0x91D7deA99716Cbb247E81F1cfB692009164a967E"
 	PrivateKey = "dcb154cd2e8e0d5deffbc43562933e02ac3415225f5147cbcd37b380191fbe49"
 
-	RecordFile = "./data/"
+	RecordFilePath = "./data/"
 )

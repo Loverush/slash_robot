@@ -57,15 +57,21 @@ func mainLoop(client *ethclient.Client, rpcClient *rpc.Client, vrStore *utils.Vo
 			}
 		case s := <-c:
 			if s == os.Interrupt || s == os.Kill {
+				if _, err := os.Stat(vrStore.FileDir); os.IsNotExist(err) {
+					err := os.MkdirAll(vrStore.FileDir, os.ModePerm)
+					if err != nil {
+						log.Fatal("Error create data dir:", err)
+					}
+				}
 				for val, record := range vrStore.VoteRecord {
 					filePath := path.Join(vrStore.FileDir, hex.EncodeToString(val.Bytes()))
-					f, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
+					f, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, os.ModePerm)
 					if err != nil {
-						log.Fatal("Err saveLoop VotesRecordStore:", err)
+						log.Fatal("Error saveLoop VotesRecordStore:", err)
 					}
 					e := json.NewEncoder(f)
 					if err := e.Encode(record); err != nil {
-						log.Fatal("Error saving vrStore: ", err)
+						log.Fatal("Error saving vrStore:", err)
 					}
 					f.Close()
 				}
@@ -94,7 +100,7 @@ func main() {
 	var out []interface{}
 	err := slashInstance.Call(nil, &out, "isRelayer", account.Addr)
 	if err != nil {
-		log.Fatal("Relayer register:", err)
+		log.Fatal("Error register relayer:", err)
 	}
 
 	if !(out[0].(bool)) {
@@ -102,7 +108,7 @@ func main() {
 		ops.Value = new(big.Int).Mul(big.NewInt(1e18), big.NewInt(100))
 		tx, err := slashInstance.Transact(ops, "register")
 		if err != nil {
-			log.Fatal("Relayer register:", err)
+			log.Fatal("Error register relayer:", err)
 		}
 		var rc *types.Receipt
 		for i := 0; i < 180; i++ {
@@ -118,6 +124,6 @@ func main() {
 		}
 	}
 
-	var vrStore = utils.NewVotesRecordStore(params.RecordFile)
+	var vrStore = utils.NewVotesRecordStore(params.RecordFilePath)
 	mainLoop(client, rpcClient, vrStore)
 }
