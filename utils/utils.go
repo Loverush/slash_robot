@@ -1,18 +1,13 @@
 package utils
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"math/big"
 	"os"
-	"path"
 	"slash-robot/abi"
 	"sync"
-	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -22,33 +17,26 @@ import (
 )
 
 var (
-	ChainId            = big.NewInt(714)
-	SlashIndicatorAddr = common.HexToAddress("0x0000000000000000000000000000000000001001")
+	chainId           = big.NewInt(714)
+	slashContractAddr = common.HexToAddress("0x0000000000000000000000000000000000001001")
 )
 
 type VotesRecordStore struct {
 	VoteRecord map[types.BLSPublicKey]map[uint64]*types.VoteEnvelope
 	mu         sync.RWMutex
-	FileDir    string
+	file       *os.File
 }
 
 type record struct {
-	Height uint64
-	Vote   *types.VoteEnvelope
-}
-
-type VoteData struct {
-	SrcNum  *big.Int
-	SrcHash common.Hash
-	TarNum  *big.Int
-	TarHash common.Hash
-	Sig     []byte
+	voteAddr types.BLSPublicKey
+	height   uint64
+	vote     *types.VoteEnvelope
 }
 
 type slashEvidence struct {
-	VoteA    *VoteData
-	VoteB    *VoteData
-	VoteAddr []byte
+	voteA    *types.VoteData
+	voteB    *types.VoteData
+	voteAddr types.BLSPublicKey
 }
 
 func CheckVote(vote *types.VoteEnvelope, vrStore *VotesRecordStore) (bool, uint64) {
@@ -56,6 +44,7 @@ func CheckVote(vote *types.VoteEnvelope, vrStore *VotesRecordStore) (bool, uint6
 	voteData := vote.Data
 	// 1. no double vote
 	if _, ok := vrStore.VoteRecord[voteAddr][voteData.TargetNumber]; ok {
+		// TODO delete local data
 		delete(vrStore.VoteRecord, voteAddr)
 		return false, voteData.TargetNumber
 	}
@@ -63,103 +52,65 @@ func CheckVote(vote *types.VoteEnvelope, vrStore *VotesRecordStore) (bool, uint6
 	for height := voteData.TargetNumber - 1; height > voteData.SourceNumber+1; height-- {
 		if vote, ok := vrStore.VoteRecord[voteAddr][height]; ok {
 			if vote.Data.SourceNumber > voteData.SourceNumber {
+				// TODO delete local data
 				delete(vrStore.VoteRecord, voteAddr)
 				return false, height
 			}
 		}
 	}
-	vrStore.set(voteAddr, voteData.TargetNumber, vote)
+	vrStore.Set(voteAddr, voteData.TargetNumber, vote)
 	return true, 0
 }
 
 func ReportVote(vote1, vote2 *types.VoteEnvelope, client *ethclient.Client) {
 	var evidence slashEvidence
-	evidence.VoteA = &VoteData{
-		SrcNum:  big.NewInt(int64(vote1.Data.SourceNumber)),
-		SrcHash: vote1.Data.SourceHash,
-		TarNum:  big.NewInt(int64(vote1.Data.TargetNumber)),
-		TarHash: vote1.Data.TargetHash,
-		Sig:     vote1.Signature[:],
-	}
-	evidence.VoteB = &VoteData{
-		SrcNum:  big.NewInt(int64(vote2.Data.SourceNumber)),
-		SrcHash: vote2.Data.SourceHash,
-		TarNum:  big.NewInt(int64(vote2.Data.TargetNumber)),
-		TarHash: vote2.Data.TargetHash,
-		Sig:     vote2.Signature[:],
-	}
-	evidence.VoteAddr = vote1.VoteAddress.Bytes()
+	evidence.voteA = vote1.Data
+	evidence.voteB = vote2.Data
+	evidence.voteAddr = vote1.VoteAddress
 
 	account := SlashAccount
 	account.Key, _ = crypto.HexToECDSA(account.RawKey)
-	ops, _ := bind.NewKeyedTransactorWithChainID(account.Key, ChainId)
-	slashInstance, _ := abi.NewContractInstance(SlashIndicatorAddr, abi.SlashABI, client)
-	tx, err := slashInstance.Transact(ops, "submitFinalityViolationEvidence", evidence)
+	ops, _ := bind.NewKeyedTransactorWithChainID(account.Key, chainId)
+	slashInstance, _ := abi.NewContractInstance(slashContractAddr, abi.SlashABI, client)
+	_, err := slashInstance.Transact(ops, "submitFinalityViolationEvidence", evidence)
 	if err != nil {
-		log.Fatal("Report Vote:", err)
-	}
-	var rc *types.Receipt
-	for i := 0; i < 180; i++ {
-		rc, _ = client.TransactionReceipt(context.Background(), tx.Hash())
-		if rc != nil {
-			fmt.Println(rc.Logs)
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	if rc == nil {
-		log.Fatal("Report Vote: submit evidence failed")
+		return
 	}
 }
 
-func NewVotesRecordStore(fileDir string) *VotesRecordStore {
-	vrStore := &VotesRecordStore{
-		VoteRecord: make(map[types.BLSPublicKey]map[uint64]*types.VoteEnvelope),
-		FileDir:    fileDir,
-	}
-	files, err := ioutil.ReadDir(fileDir)
+func NewVotesRecordStore(filename string) *VotesRecordStore {
+	s := &VotesRecordStore{VoteRecord: make(map[types.BLSPublicKey]map[uint64]*types.VoteEnvelope)}
+	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
 		log.Fatal("VotesRecordStore:", err)
 	}
-	for _, file := range files {
-		if len(file.Name()) != 53 {
-			continue
-		}
-		go vrStore.load(file.Name())
-	}
-	return vrStore
+	s.file = f
+	return s
 }
 
-func (vr *VotesRecordStore) set(voteAddr types.BLSPublicKey, height uint64, vote *types.VoteEnvelope) bool {
-	vr.mu.Lock()
-	defer vr.mu.Unlock()
+//func (vr *VotesRecordStore) save(voteAddr types.BLSPublicKey, height uint64, vote *types.VoteEnvelope) error {
+//	e := json.NewEncoder(vr.file)
+//	return e.Encode(record{voteAddr, height, vote})
+//}
+
+func (vr *VotesRecordStore) Set(voteAddr types.BLSPublicKey, height uint64, vote *types.VoteEnvelope) bool {
 	if _, ok := vr.VoteRecord[voteAddr]; !ok {
 		vr.VoteRecord[voteAddr] = make(map[uint64]*types.VoteEnvelope)
 	}
 	vr.VoteRecord[voteAddr][height] = vote
-	if _, ok := vr.VoteRecord[voteAddr][height-256]; ok {
-		delete(vr.VoteRecord[voteAddr], height-256)
-	}
 	return true
 }
 
-func (vr *VotesRecordStore) load(file string) error {
-	filePath := path.Join(vr.FileDir, file)
-	f, err := os.Open(filePath)
-	defer f.Close()
-	if err != nil {
-		log.Fatal("Err saveLoop VotesRecordStore:", err)
-	}
-	if _, err := f.Seek(0, 0); err != nil {
+func (vr *VotesRecordStore) Load() error {
+	if _, err := vr.file.Seek(0, 0); err != nil {
 		return err
 	}
-	var voteAddr types.BLSPublicKey
-	copy(voteAddr[:], file[:len(file)-5])
-	d := json.NewDecoder(f)
+	d := json.NewDecoder(vr.file)
+	var err error
 	for err == nil {
 		var r record
 		if err = d.Decode(&r); err == nil {
-			vr.set(voteAddr, r.Height, r.Vote)
+			vr.Set(r.voteAddr, r.height, r.vote)
 		}
 	}
 	if err == io.EOF {
