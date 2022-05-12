@@ -14,7 +14,7 @@ import (
 var (
 	bscTestnet = params.BSCTestnet
 	bsc        = params.BSC
-	gethHttp   = params.GethHttp
+	gethWS     = params.GethWS
 	gethIpc    = params.GethIpc
 )
 
@@ -28,7 +28,7 @@ func GetCurrentClient(clientEntered string) *ethclient.Client {
 	case "geth_ipc":
 		clientType = gethIpc
 	default:
-		clientType = gethHttp
+		clientType = gethWS
 	}
 
 	client, err := ethclient.Dial(clientType)

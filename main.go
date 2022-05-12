@@ -73,7 +73,7 @@ func checkVote(vote *types.VoteEnvelope, vrStore *utils.VotesRecordStore) (bool,
 }
 
 func main() {
-	clientEntered := flag.String("client", "geth_http", "Gateway to the bsc protocol. Available options:\n\t-bsc_testnet\n\t-bsc\n\t-geth_http\n\t-geth_ipc")
+	clientEntered := flag.String("client", "geth_ws", "Gateway to the bsc protocol. Available options:\n\t-bsc_testnet\n\t-bsc\n\t-geth_ws\n\t-geth_ipc")
 	flag.Parse()
 
 	rpcClient := utils.InitRPCClient(*clientEntered)
