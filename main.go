@@ -21,24 +21,19 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/rpc"
 )
 
 var relayerHubAddr = common.HexToAddress("0x0000000000000000000000000000000000001006")
 
-func mainLoop(client *ethclient.Client, rpcClient *rpc.Client, vrStore *utils.VotesRecordStore) {
-	// Go channel to pipe data from client subscription
+func voteMonitorLoop(client *ethclient.Client, vrStore *utils.VotesRecordStore) {
 	newVoteChannel := make(chan *types.VoteEnvelope)
-
-	// Subscribe to receive one time events for new vote
-	_, err := rpcClient.EthSubscribe(
-		context.Background(), newVoteChannel, "newVotes",
-	)
+	sub, err := client.SubscribeNewVotes(context.Background(), newVoteChannel)
+	defer sub.Unsubscribe()
 
 	if err != nil {
-		fmt.Println("error while subscribing: ", err)
+		log.Fatal("error while subscribing new vote: ", err)
 	} else {
-		fmt.Println("Subscribed to vote pool")
+		fmt.Println("Subscribed to new vote")
 	}
 
 	c := make(chan os.Signal, 0)
@@ -46,8 +41,7 @@ func mainLoop(client *ethclient.Client, rpcClient *rpc.Client, vrStore *utils.Vo
 	for {
 		select {
 		case vote := <-newVoteChannel:
-			//fmt.Println("vote message received:", vote.Data)
-			ok, height := checkVote(vote, vrStore)
+			ok, height := utils.CheckVote(vote, vrStore)
 			if !ok {
 				vote2 := vrStore.VoteRecord[vote.VoteAddress][height]
 				fmt.Println("--------------bad vote detected!--------------")
@@ -73,7 +67,7 @@ func mainLoop(client *ethclient.Client, rpcClient *rpc.Client, vrStore *utils.Vo
 					if err := e.Encode(record); err != nil {
 						log.Fatal("Error saving vrStore:", err)
 					}
-					f.Close()
+					_ = f.Close()
 				}
 				os.Exit(0)
 			}
@@ -82,17 +76,31 @@ func mainLoop(client *ethclient.Client, rpcClient *rpc.Client, vrStore *utils.Vo
 	}
 }
 
-func checkVote(vote *types.VoteEnvelope, vrStore *utils.VotesRecordStore) (bool, uint64) {
-	return utils.CheckVote(vote, vrStore)
+func finalizedHeaderMonitorLoop(client *ethclient.Client) {
+	newFinalizedHeaderChannel := make(chan *types.Header)
+	sub, err := client.SubscribeNewFinalizedHeader(context.Background(), newFinalizedHeaderChannel)
+	defer sub.Unsubscribe()
+
+	if err != nil {
+		log.Fatal("error while subscribing finalized header: ", err)
+	} else {
+		fmt.Println("Subscribed to finalized header")
+	}
+
+	var preFinalizedHeight uint64
+	var finalizedHeights []uint64
+	for {
+		header := <-newFinalizedHeaderChannel
+		if height := header.Number.Uint64(); height >= preFinalizedHeight {
+			preFinalizedHeight = height
+			finalizedHeights = append(finalizedHeights, height)
+		} else {
+			log.Fatal("Finalized height decline: ", finalizedHeights[len(finalizedHeights)-10:])
+		}
+	}
 }
 
-func main() {
-	clientEntered := flag.String("client", "geth_ws", "Gateway to the bsc protocol. Available options:\n\t-bsc_testnet\n\t-bsc\n\t-geth_ws\n\t-geth_ipc")
-	flag.Parse()
-
-	rpcClient := utils.InitRPCClient(*clientEntered)
-	client := utils.GetCurrentClient(*clientEntered)
-
+func registerRelayer(client *ethclient.Client) {
 	account := utils.SlashAccount
 	account.Key, _ = crypto.HexToECDSA(account.RawKey)
 	slashInstance, _ := abi.NewContractInstance(relayerHubAddr, abi.RelayerHubABI, client)
@@ -112,10 +120,11 @@ func main() {
 		}
 		var rc *types.Receipt
 		for i := 0; i < 180; i++ {
-			rc, _ = client.TransactionReceipt(context.Background(), tx.Hash())
-			if rc != nil {
-				fmt.Println(rc.Logs)
+			rc, err = client.TransactionReceipt(context.Background(), tx.Hash())
+			if err == nil && rc.Status != 0 {
 				break
+			} else if rc != nil && rc.Status == 0 {
+				log.Fatal("Register relayer failed")
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
@@ -123,7 +132,19 @@ func main() {
 			log.Fatal("Register relayer failed")
 		}
 	}
+}
+
+func main() {
+	clientEntered := flag.String("client", "geth_ws", "Gateway to the bsc protocol. Available options:\n\t-bsc_testnet\n\t-bsc\n\t-geth_ws\n\t-geth_ipc")
+	flag.Parse()
+
+	client := utils.GetCurrentClient(*clientEntered)
+	defer client.Close()
+
+	registerRelayer(client)
 
 	var vrStore = utils.NewVotesRecordStore(params.RecordFilePath)
-	mainLoop(client, rpcClient, vrStore)
+	voteMonitorLoop(client, vrStore)
+
+	finalizedHeaderMonitorLoop(client)
 }

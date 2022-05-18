@@ -87,4 +87,4 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
-replace github.com/ethereum/go-ethereum => github.com/Loverush/bsc v1.1.8-0.20220510032155-59cddc50922e
+replace github.com/ethereum/go-ethereum => github.com/Loverush/bsc f9b4a91ca250a6e0088a07b2fdfa6754d6c491fd
