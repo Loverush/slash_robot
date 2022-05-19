@@ -73,15 +73,15 @@ func CheckVote(vote *types.VoteEnvelope, vrStore *VotesRecordStore) (bool, uint6
 }
 
 func ReportVote(vote1, vote2 *types.VoteEnvelope, client *ethclient.Client) {
-	var evidence slashEvidence
-	evidence.VoteA = &VoteData{
+	var evidence abi.SlashIndicatorFinalityEvidence
+	evidence.VoteA = abi.SlashIndicatorVoteData{
 		SrcNum:  big.NewInt(int64(vote1.Data.SourceNumber)),
 		SrcHash: vote1.Data.SourceHash,
 		TarNum:  big.NewInt(int64(vote1.Data.TargetNumber)),
 		TarHash: vote1.Data.TargetHash,
 		Sig:     vote1.Signature[:],
 	}
-	evidence.VoteB = &VoteData{
+	evidence.VoteB = abi.SlashIndicatorVoteData{
 		SrcNum:  big.NewInt(int64(vote2.Data.SourceNumber)),
 		SrcHash: vote2.Data.SourceHash,
 		TarNum:  big.NewInt(int64(vote2.Data.TargetNumber)),
@@ -93,8 +93,8 @@ func ReportVote(vote1, vote2 *types.VoteEnvelope, client *ethclient.Client) {
 	account := SlashAccount
 	account.Key, _ = crypto.HexToECDSA(account.RawKey)
 	ops, _ := bind.NewKeyedTransactorWithChainID(account.Key, ChainId)
-	slashInstance, _ := abi.NewContractInstance(SlashIndicatorAddr, abi.SlashABI, client)
-	tx, err := slashInstance.Transact(ops, "submitFinalityViolationEvidence", evidence)
+	slashIndicator, _ := abi.NewSlash(SlashIndicatorAddr, client)
+	tx, err := slashIndicator.SubmitFinalityViolationEvidence(ops, evidence)
 	if err != nil {
 		log.Fatal("Report Vote:", err)
 	}

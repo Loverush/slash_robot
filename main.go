@@ -103,18 +103,17 @@ func finalizedHeaderMonitorLoop(client *ethclient.Client) {
 func registerRelayer(client *ethclient.Client) {
 	account := utils.SlashAccount
 	account.Key, _ = crypto.HexToECDSA(account.RawKey)
-	slashInstance, _ := abi.NewContractInstance(relayerHubAddr, abi.RelayerHubABI, client)
+	relayerHub, _ := abi.NewRelayerhub(relayerHubAddr, client)
 
-	var out []interface{}
-	err := slashInstance.Call(nil, &out, "isRelayer", account.Addr)
+	out, err := relayerHub.IsRelayer(&bind.CallOpts{}, account.Addr)
 	if err != nil {
 		log.Fatal("Error register relayer:", err)
 	}
 
-	if !(out[0].(bool)) {
+	if !out {
 		ops, _ := bind.NewKeyedTransactorWithChainID(account.Key, utils.ChainId)
 		ops.Value = new(big.Int).Mul(big.NewInt(1e18), big.NewInt(100))
-		tx, err := slashInstance.Transact(ops, "register")
+		tx, err := relayerHub.Register(ops)
 		if err != nil {
 			log.Fatal("Error register relayer:", err)
 		}
