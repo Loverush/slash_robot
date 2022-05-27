@@ -1,5 +1,7 @@
 package params
 
+import "time"
+
 var (
 	BSCTestnet = "https://data-seed-prebsc-2-s1.binance.org:8545/"
 	BSC        = "https://bsc-dataseed.binance.org/"
@@ -10,4 +12,6 @@ var (
 	PrivateKey = "dcb154cd2e8e0d5deffbc43562933e02ac3415225f5147cbcd37b380191fbe49"
 
 	RecordFilePath = "./data/"
+
+	UpdateInterval = time.Duration(60 * 1e9)
 )

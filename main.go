@@ -133,6 +133,59 @@ func registerRelayer(client *ethclient.Client) {
 	}
 }
 
+func monitorHeader(client *ethclient.Client) {
+	newHeadChannel := make(chan *types.Header)
+	sub, err := client.SubscribeNewHead(context.Background(), newHeadChannel)
+	defer sub.Unsubscribe()
+
+	if err != nil {
+		log.Fatal("Error while subscribing new head: ", err)
+	} else {
+		fmt.Println("Subscribed to new head")
+	}
+
+	c := make(chan os.Signal, 0)
+	signal.Notify(c)
+
+	ticker := time.NewTicker(params.UpdateInterval)
+	defer ticker.Stop()
+
+	type CountReocord struct {
+		Record  []int
+		Average int
+	}
+	cr := &CountReocord{Record: make([]int, 0), Average: 0}
+	count := 0
+	for {
+		select {
+		case head := <-newHeadChannel:
+			fmt.Println("New head at height:", head.Number.Uint64())
+			count += 1
+		case <-ticker.C:
+			fmt.Printf("\n--------%d Heads Received Last Minute--------\n\n", count)
+			cr.Record = append(cr.Record, count)
+			cr.Average += count
+			count = 0
+		case s := <-c:
+			if s == os.Interrupt || s == os.Kill {
+				cr.Average = cr.Average / len(cr.Record)
+				filePath := path.Join("./data/", time.Now().String()+".json")
+				f, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, os.ModePerm)
+				if err != nil {
+					log.Fatal("Error saving countRecord:", err)
+				}
+				e := json.NewEncoder(f)
+				if err := e.Encode(cr); err != nil {
+					log.Fatal("Error saving countRecord:", err)
+				}
+				_ = f.Close()
+				os.Exit(0)
+			}
+		}
+
+	}
+}
+
 func main() {
 	clientEntered := flag.String("client", "geth_ws", "Gateway to the bsc protocol. Available options:\n\t-bsc_testnet\n\t-bsc\n\t-geth_ws\n\t-geth_ipc")
 	flag.Parse()
@@ -140,10 +193,12 @@ func main() {
 	client := utils.GetCurrentClient(*clientEntered)
 	defer client.Close()
 
-	registerRelayer(client)
+	//registerRelayer(client)
 
-	var vrStore = utils.NewVotesRecordStore(params.RecordFilePath)
-	voteMonitorLoop(client, vrStore)
+	//var vrStore = utils.NewVotesRecordStore(params.RecordFilePath)
+	//voteMonitorLoop(client, vrStore)
+	//
+	//finalizedHeaderMonitorLoop(client)
 
-	finalizedHeaderMonitorLoop(client)
+	monitorHeader(client)
 }
