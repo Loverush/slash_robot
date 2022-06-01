@@ -24,6 +24,8 @@ import (
 var (
 	ChainId            = big.NewInt(714)
 	SlashIndicatorAddr = common.HexToAddress("0x0000000000000000000000000000000000001001")
+	TokenHubAddr       = common.HexToAddress("0x0000000000000000000000000000000000001004")
+	RelayerHubAddr     = common.HexToAddress("0x0000000000000000000000000000000000001006")
 )
 
 type VotesRecordStore struct {

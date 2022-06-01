@@ -23,8 +23,6 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-var relayerHubAddr = common.HexToAddress("0x0000000000000000000000000000000000001006")
-
 func voteMonitorLoop(client *ethclient.Client, vrStore *utils.VotesRecordStore) {
 	newVoteChannel := make(chan *types.VoteEnvelope)
 	sub, err := client.SubscribeNewVotes(context.Background(), newVoteChannel)
@@ -103,7 +101,7 @@ func finalizedHeaderMonitorLoop(client *ethclient.Client) {
 func registerRelayer(client *ethclient.Client) {
 	account := utils.SlashAccount
 	account.Key, _ = crypto.HexToECDSA(account.RawKey)
-	relayerHub, _ := abi.NewRelayerhub(relayerHubAddr, client)
+	relayerHub, _ := abi.NewRelayerhub(utils.RelayerHubAddr, client)
 
 	out, err := relayerHub.IsRelayer(&bind.CallOpts{}, account.Addr)
 	if err != nil {
@@ -186,6 +184,40 @@ func monitorHeader(client *ethclient.Client) {
 	}
 }
 
+func callContract(client *ethclient.Client) {
+	account := utils.SlashAccount
+	account.Key, _ = crypto.HexToECDSA(account.RawKey)
+	tokenHub, _ := abi.NewTokenhub(utils.TokenHubAddr, client)
+
+	ops, _ := bind.NewKeyedTransactorWithChainID(account.Key, utils.ChainId)
+	ops.Value = new(big.Int).Mul(big.NewInt(1e18), big.NewInt(2))
+	tx, err := tokenHub.TransferOut(
+		ops,
+		common.HexToAddress("0x0000000000000000000000000000000000000000"),
+		common.HexToAddress("0xC0853E5C6b9Fa64F05D1eAc460a8beA48cDA9d63"),
+		big.NewInt(1e18),
+		150000+uint64(time.Now().Unix()))
+	if err != nil {
+		log.Fatal("Error call contract:", err)
+	}
+	var rc *types.Receipt
+	for i := 0; i < 180; i++ {
+		rc, err = client.TransactionReceipt(context.Background(), tx.Hash())
+		if err == nil && rc.Status != 0 {
+			break
+		} else if rc != nil && rc.Status == 0 {
+			log.Fatal("Error call contract", rc.Logs)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if rc == nil {
+		log.Fatal("Transaction failed")
+	} else {
+		fmt.Println("Transaction success")
+	}
+
+}
+
 func main() {
 	clientEntered := flag.String("client", "geth_ws", "Gateway to the bsc protocol. Available options:\n\t-bsc_testnet\n\t-bsc\n\t-geth_ws\n\t-geth_ipc")
 	flag.Parse()
@@ -200,5 +232,5 @@ func main() {
 	//
 	//finalizedHeaderMonitorLoop(client)
 
-	monitorHeader(client)
+	callContract(client)
 }
