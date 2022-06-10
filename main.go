@@ -36,9 +36,17 @@ func voteMonitorLoop(client *ethclient.Client, vrStore *utils.VotesRecordStore) 
 
 	c := make(chan os.Signal, 0)
 	signal.Notify(c)
+	//var startNum uint64 = 0
 	for {
 		select {
 		case vote := <-newVoteChannel:
+			//if startNum == 0 {
+			//	startNum = vote.Data.SourceNumber
+			//}
+			//if vote.Data.SourceNumber == startNum+5 {
+			//	fmt.Println("test slash")
+			//	utils.TestSlash(vote, client)
+			//}
 			ok, height := utils.CheckVote(vote, vrStore)
 			if !ok {
 				vote2 := vrStore.VoteRecord[vote.VoteAddress][height]
@@ -225,12 +233,12 @@ func main() {
 	client := utils.GetCurrentClient(*clientEntered)
 	defer client.Close()
 
-	//registerRelayer(client)
+	registerRelayer(client)
 
-	//var vrStore = utils.NewVotesRecordStore(params.RecordFilePath)
-	//voteMonitorLoop(client, vrStore)
-	//
+	var vrStore = utils.NewVotesRecordStore(params.RecordFilePath)
+	voteMonitorLoop(client, vrStore)
+
 	//finalizedHeaderMonitorLoop(client)
 
-	callContract(client)
+	//callContract(client)
 }

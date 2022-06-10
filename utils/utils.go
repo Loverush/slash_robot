@@ -2,6 +2,7 @@ package utils
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +20,11 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	validatorpb "github.com/prysmaticlabs/prysm/proto/prysm/v1alpha1/validator-client"
+	"github.com/prysmaticlabs/prysm/validator/accounts/iface"
+	"github.com/prysmaticlabs/prysm/validator/accounts/wallet"
+	"github.com/prysmaticlabs/prysm/validator/keymanager"
+	"github.com/prysmaticlabs/prysm/validator/keymanager/imported"
 )
 
 var (
@@ -26,6 +32,7 @@ var (
 	SlashIndicatorAddr = common.HexToAddress("0x0000000000000000000000000000000000001001")
 	TokenHubAddr       = common.HexToAddress("0x0000000000000000000000000000000000001004")
 	RelayerHubAddr     = common.HexToAddress("0x0000000000000000000000000000000000001006")
+	ValidatorSetAddr   = common.HexToAddress("0x0000000000000000000000000000000000001000")
 )
 
 type VotesRecordStore struct {
@@ -95,6 +102,7 @@ func ReportVote(vote1, vote2 *types.VoteEnvelope, client *ethclient.Client) {
 	account := SlashAccount
 	account.Key, _ = crypto.HexToECDSA(account.RawKey)
 	ops, _ := bind.NewKeyedTransactorWithChainID(account.Key, ChainId)
+	//ops.GasLimit = 800000
 	slashIndicator, _ := abi.NewSlash(SlashIndicatorAddr, client)
 	tx, err := slashIndicator.SubmitFinalityViolationEvidence(ops, evidence)
 	if err != nil {
@@ -102,16 +110,92 @@ func ReportVote(vote1, vote2 *types.VoteEnvelope, client *ethclient.Client) {
 	}
 	var rc *types.Receipt
 	for i := 0; i < 180; i++ {
-		rc, _ = client.TransactionReceipt(context.Background(), tx.Hash())
-		if rc != nil {
-			fmt.Println(rc.Logs)
+		rc, err = client.TransactionReceipt(context.Background(), tx.Hash())
+		if err == nil && rc.Status != 0 {
+			fmt.Println("Report Vote: submit evidence success")
 			break
+		}
+		if rc != nil && rc.Status == 0 {
+			log.Fatal("Report Vote: tx failed: ", err, rc)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	if rc == nil {
 		log.Fatal("Report Vote: submit evidence failed")
 	}
+}
+
+func TestSlash(vote *types.VoteEnvelope, client *ethclient.Client) {
+	keyfile := "./bls/keystore/keystore-wholly-valid-oryx.json"
+	keyJSON, err := ioutil.ReadFile(keyfile)
+	if err != nil {
+		log.Fatal("error read keystore file: ", err)
+	}
+	keystore := &keymanager.Keystore{}
+	if err := json.Unmarshal(keyJSON, keystore); err != nil {
+		log.Fatalf("Could not decode keystore file: %v.", err)
+	}
+	if keystore.Pubkey == "" {
+		log.Fatalf(" Missing public key, wrong keystore file.")
+	}
+
+	walletDir := "./bls/wallet"
+	dirExists, err := wallet.Exists(walletDir)
+	if err != nil || !dirExists {
+		log.Fatalf("BLS wallet not exists.")
+	}
+
+	walletPassword := "password"
+	w, err := wallet.OpenWallet(context.Background(), &wallet.Config{
+		WalletDir:      walletDir,
+		WalletPassword: walletPassword,
+	})
+	if err != nil {
+		log.Fatalf("Open BLS wallet failed: %v.", err)
+	}
+	km, err := w.InitializeKeymanager(context.Background(), iface.InitKeymanagerConfig{ListenForChanges: false})
+	if err != nil {
+		log.Fatalf("Initialize key manager failed: %v.", err)
+	}
+	ikm, ok := km.(*imported.Keymanager)
+	if !ok {
+		log.Fatalf("Could not assert keymanager interface to concrete type.")
+	}
+
+	var fakeVote = &types.VoteEnvelope{
+		Data: &types.VoteData{
+			SourceNumber: vote.Data.SourceNumber,
+			SourceHash:   vote.Data.SourceHash,
+			TargetNumber: vote.Data.TargetNumber,
+			TargetHash:   common.BytesToHash(common.Hex2Bytes(string(rune(vote.Data.TargetNumber)))),
+		},
+	}
+	voteHash := fakeVote.Data.Hash()
+	pubKeys, err := km.FetchValidatingPublicKeys(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*50)
+	defer cancel()
+	signature, err := ikm.Sign(ctx, &validatorpb.SignRequest{
+		PublicKey:   pubKeys[0][:],
+		SigningRoot: voteHash[:],
+	})
+	copy(fakeVote.VoteAddress[:], pubKeys[0][:])
+	copy(fakeVote.Signature[:], signature.Marshal()[:])
+
+	ReportVote(vote, fakeVote, client)
+}
+
+func newBLSPubKey(voteAddr string) types.BLSPublicKey {
+	var BLSPubKey types.BLSPublicKey
+	voteAddrBytes, _ := hex.DecodeString(voteAddr)
+	copy(BLSPubKey[:], voteAddrBytes)
+	return BLSPubKey
+}
+
+func newBLSSig(sig string) types.BLSSignature {
+	var BLSSig types.BLSSignature
+	sigBytes, _ := hex.DecodeString(sig)
+	copy(BLSSig[:], sigBytes)
+	return BLSSig
 }
 
 func NewVotesRecordStore(fileDir string) *VotesRecordStore {

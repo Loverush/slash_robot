@@ -5,7 +5,7 @@ import "time"
 var (
 	BSCTestnet = "https://data-seed-prebsc-2-s1.binance.org:8545/"
 	BSC        = "https://bsc-dataseed.binance.org/"
-	GethWS     = "http://172.22.41.197:8545"
+	GethWS     = "ws://127.0.0.1:8547"
 	GethIpc    = "/server/validator/geth.ipc"
 
 	Address    = "0x91D7deA99716Cbb247E81F1cfB692009164a967E"
