@@ -65,14 +65,12 @@ func CheckVote(vote *types.VoteEnvelope, vrStore *VotesRecordStore) (bool, uint6
 	voteData := vote.Data
 	// 1. no double vote
 	if _, ok := vrStore.VoteRecord[voteAddr][voteData.TargetNumber]; ok {
-		delete(vrStore.VoteRecord, voteAddr)
 		return false, voteData.TargetNumber
 	}
 	// 2. no vote within the span of other votes
 	for height := voteData.TargetNumber - 1; height > voteData.SourceNumber+1; height-- {
 		if vote, ok := vrStore.VoteRecord[voteAddr][height]; ok {
 			if vote.Data.SourceNumber > voteData.SourceNumber {
-				delete(vrStore.VoteRecord, voteAddr)
 				return false, height
 			}
 		}

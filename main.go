@@ -47,13 +47,14 @@ func voteMonitorLoop(client *ethclient.Client, vrStore *utils.VotesRecordStore) 
 			//	fmt.Println("test slash")
 			//	utils.TestSlash(vote, client)
 			//}
+			fmt.Println(vote.Data.TargetNumber, vote.VoteAddress[0])
 			ok, height := utils.CheckVote(vote, vrStore)
 			if !ok {
 				vote2 := vrStore.VoteRecord[vote.VoteAddress][height]
 				fmt.Println("--------------bad vote detected!--------------")
-				fmt.Println("vote address:", vote.VoteAddress)
-				fmt.Println("vote message:", vote2.Data)
+				fmt.Println("vote address:", hex.EncodeToString(vote.VoteAddress.Bytes()))
 				utils.ReportVote(vote, vote2, client)
+				delete(vrStore.VoteRecord, vote.VoteAddress)
 			}
 		case s := <-c:
 			if s == os.Interrupt || s == os.Kill {
